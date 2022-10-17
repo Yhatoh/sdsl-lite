@@ -435,6 +435,11 @@ class sd_vector
         {
             return iterator(this, size());
         }
+        
+        size_type get_mini_or_low_bits_mcl() const
+        {
+          return m_high_1_select.get_mini_or_long_bits() + m_high_0_select.get_mini_or_long_bits();
+        }
 };
 
 //! Specialized constructor that is a bit more space-efficient than the default.

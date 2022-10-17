@@ -22,6 +22,7 @@
 #define INCLUDED_SDSL_RANK_SUPPORT_V
 
 #include "rank_support.hpp"
+#include "util.hpp"
 
 //! Namespace for the succinct data structure library.
 namespace sdsl
@@ -62,27 +63,49 @@ class rank_support_v : public rank_support
         enum { bit_pat_len = t_pat_len };
     private:
         // basic block for interleaved storage of superblockrank and blockrank
-        int_vector<64> m_basic_block;
+        //int_vector<64> m_basic_block;
+        int_vector<> m_basic_block;
+        int_vector<64> new_int_vector;
     public:
         explicit rank_support_v(const bit_vector* v = nullptr) {
+            //std::cout << "- RANK SUPPORT V ENTER" << "\n";
+//            std::cout << "rank_support v\n";
             set_vector(v);
             if (v == nullptr) {
                 return;
             } else if (v->empty()) {
-                m_basic_block = int_vector<64>(2,0);   // resize structure for basic_blocks
+                m_basic_block = int_vector<>(2,0);   // resize structure for basic_blocks
+                //m_basic_block = int_vector<64>(2,0);   // resize structure for basic_blocks
                 return;
             }
-            size_type basic_block_size = ((v->capacity() >> 9)+1)<<1;
+            //size_type basic_block_size = ((v->capacity() >> 9)+1)<<1;
+            size_type basic_block_size = ((v->capacity() >> 9)+1);
             m_basic_block.resize(basic_block_size);   // resize structure for basic_blocks
+            new_int_vector.resize(basic_block_size);
+            //uint64_t maxi = 0;
+            //for(uint64_t bit = 0; bit < m_basic_block.size(); bit++) {
+            //  maxi = (m_basic_block[bit] > maxi ? m_basic_block[bit] : maxi);
+            //}
+
+            //std::cout << "Maximo elemento en m_basic_block " << maxi << "\n";
             if (m_basic_block.empty())
                 return;
             const uint64_t* data = m_v->data();
             size_type i, j=0;
-            m_basic_block[0] = m_basic_block[1] = 0;
+            m_basic_block[0] = 0;
+            new_int_vector[0] = 0;
+            for(uint64_t bit = 0; bit < m_basic_block.size(); bit++) {
+              m_basic_block[bit] = 0;
+            }
+            //for(uint64_t bit = 0; bit < m_basic_block.size(); bit++) {
+            //  maxi = (m_basic_block[bit] > maxi ? m_basic_block[bit] : maxi);
+            //}
 
+            //std::cout << "Maximo elemento en m_basic_block " << maxi << "\n";
             uint64_t carry = trait_type::init_carry();
             uint64_t sum   = trait_type::args_in_the_word(*data, carry);
             uint64_t second_level_cnt = 0;
+            /*
             for (i = 1; i < (m_v->capacity()>>6) ; ++i) {
                 if (!(i&0x7)) {// if i%8==0
                     j += 2;
@@ -102,7 +125,45 @@ class rank_support_v : public rank_support
                 m_basic_block[j-1] = second_level_cnt;
                 m_basic_block[j]   = m_basic_block[j-2] + sum;
                 m_basic_block[j+1] = 0;
+            }*/
+            for (i = 1; i < (m_v->capacity()>>6) ; ++i) {
+                if (!(i&0x7)) {// if i%8==0
+                    //j += 2;
+                    j += 1;
+                    //m_basic_block[j-1] = second_level_cnt;
+                    new_int_vector[j] = second_level_cnt;
+                    m_basic_block[j] 	= m_basic_block[j-1] + sum;
+                    second_level_cnt = sum = 0;
+                } else {
+                    second_level_cnt |= sum<<(63-9*(i&0x7));//  54, 45, 36, 27, 18, 9, 0
+                }
+                sum += trait_type::args_in_the_word(*(++data), carry);
             }
+            if (i&0x7) { // if i%8 != 0
+                second_level_cnt |= sum << (63-9*(i&0x7));
+                //m_basic_block[j+1] = second_level_cnt;
+                new_int_vector[j+1] = second_level_cnt;
+            } else { // if i%8 == 0
+                //j += 2;
+                j += 1;
+                //m_basic_block[j-1] = second_level_cnt;
+                new_int_vector[j] = second_level_cnt;
+                //m_basic_block[j]   = m_basic_block[j-2] + sum;
+                m_basic_block[j]   = m_basic_block[j-1] + sum;
+                new_int_vector[j+1] = 0;
+            }
+
+            //std::cout << "Tamano en bytes de m_basic_block antes de bit_compress " << sdsl::size_in_bytes(m_basic_block) << "\n";
+            //uint64_t amount_elements = m_basic_block.size();
+            //for(uint64_t bit = 0; bit < m_basic_block.size(); bit++) {
+            //  maxi = (m_basic_block[bit] > maxi ? m_basic_block[bit] : maxi);
+            //}
+            //std::cout << "Maximo elemento en m_basic_block " << maxi << "\n";
+            //std::cout << "Cantidad de elementos en m_basic_block " << amount_elements << "\n";
+            //std::cout << "Tamano bit vector pasado por parametro " << v->size() << "\n";
+            util::bit_compress(m_basic_block);
+            //std::cout <<  "Tamano en bytes de m_basic_block despues de bit_compress " << sdsl::size_in_bytes(m_basic_block) << "\n";
+            //std::cout << "- RANK SUPPORT V EXIT\n" << "\n";
         }
 
         rank_support_v(const rank_support_v&)  = default;
@@ -114,13 +175,28 @@ class rank_support_v : public rank_support
         size_type rank(size_type idx) const {
             assert(m_v != nullptr);
             assert(idx <= m_v->size());
-            const uint64_t* p = m_basic_block.data()
-                                + ((idx>>8)&0xFFFFFFFFFFFFFFFEULL); // (idx/512)*2
-            if (idx&0x3F)  // if (idx%64)!=0
-                return  *p + ((*(p+1)>>(63 - 9*((idx&0x1FF)>>6)))&0x1FF) +
-                        trait_type::word_rank(m_v->data(), idx);
-            else
-                return  *p + ((*(p+1)>>(63 - 9*((idx&0x1FF)>>6)))&0x1FF);
+            //const uint64_t* p = m_basic_block.data()
+            //                  + ((idx>>8)&0xFFFFFFFFFFFFFFFEULL); // (idx/512)*2
+            if (idx&0x3F){  // if (idx%64)!=0
+                //return  *p + ((*(p+1)>>(63 - 9*((idx&0x1FF)>>6)))&0x1FF) +
+                //        trait_type::word_rank(m_v->data(), idx);
+                //return m_basic_block[(idx>>8)&0xFFFFFFFFFFFFFFFEULL] + trait_type::word_rank(m_v->data(), idx);
+            //    std::cout << "---------------- iF ------\n" 
+            //             << "m_basic_block[((idx>>9))]  = " << m_basic_block[((idx>>9))] << "\n" 
+            //              << "((new_int_vector[((idx>>9)) + 1]  >> (63 - 9*((idx&0x1FF)>>6)))&0x1FF) = " << ((new_int_vector[((idx>>9)) + 1]  >> (63 - 9*((idx&0x1FF)>>6)))&0x1FF) << "\n"
+            //              << "trait_type::word_rank(m_v->data(), idx) = " << trait_type::word_rank(m_v->data(), idx) << "\n";
+                return m_basic_block[((idx>>9))] 
+                     + ((new_int_vector[((idx>>9)) + 1]  >> (63 - 9*((idx&0x1FF)>>6)))&0x1FF)
+                     + trait_type::word_rank(m_v->data(), idx); 
+            } else {
+                //return  *p + ((*(p+1)>>(63 - 9*((idx&0x1FF)>>6)))&0x1FF);
+                //return m_basic_block[(idx>>8)&0xFFFFFFFFFFFFFFFEULL];
+                //std::cout << "---------------- iF ------\n" 
+                //          << "m_basic_block[(idx>>9)] = " << m_basic_block[((idx>>9))] << "\n" 
+                //          << "((new_int_vector[((idx>>9)) + 1]  >> (63 - 9*((idx&0x1FF)>>6)))&0x1FF) = " << ((new_int_vector[((idx>>9)) + 1]  >> (63 - 9*((idx&0x1FF)>>6)))&0x1FF) << "\n";
+               return  m_basic_block[((idx>>9))] 
+                     + ((new_int_vector[((idx>>9)) + 1]  >> (63 - 9*((idx&0x1FF)>>6)))&0x1FF);
+            }
         }
 
         inline size_type operator()(size_type idx)const {
@@ -138,6 +214,8 @@ class rank_support_v : public rank_support
                                          util::class_name(*this));
             written_bytes += m_basic_block.serialize(out, child,
                              "cumulative_counts");
+            written_bytes += new_int_vector.serialize(out, child,
+                             "cumulative_counts");
             structure_tree::add_size(child, written_bytes);
             return written_bytes;
         }
@@ -145,6 +223,7 @@ class rank_support_v : public rank_support
         void load(std::istream& in, const int_vector<1>* v=nullptr) {
             set_vector(v);
             m_basic_block.load(in);
+            new_int_vector.load(in);
         }
 
         void set_vector(const bit_vector* v=nullptr) {
@@ -154,6 +233,7 @@ class rank_support_v : public rank_support
         void swap(rank_support_v& rs) {
             if (this != &rs) { // if rs and _this_ are not the same object
                 m_basic_block.swap(rs.m_basic_block);
+                new_int_vector.swap(rs.new_int_vector);
             }
         }
 };

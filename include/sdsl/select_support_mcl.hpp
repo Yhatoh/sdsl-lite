@@ -79,10 +79,15 @@ class select_support_mcl : public select_support
                  m_logn2                = 0,     // \f$ log^2(size) \f$
                  m_logn4                = 0;     // \f$ log^4(size) \f$
         // entry i of m_superblock equals the answer to select_1(B,i*4096)
-        int_vector<0> m_superblock;
-        int_vector<0>* m_longsuperblock = nullptr;
-        int_vector<0>* m_miniblock      = nullptr;
+        //int_vector<0> m_superblock;
+        //int_vector<0>* m_longsuperblock = nullptr;
+        //int_vector<0>* m_miniblock      = nullptr;
+        int_vector<> m_superblock;
+        int_vector<>* m_longsuperblock = nullptr;
+        int_vector<>* m_miniblock      = nullptr;
+      
         size_type m_arg_cnt             = 0;
+        size_type mini_or_long_bits = 0;
         void copy(const select_support_mcl<t_b, t_pat_len>& ss);
         void initData();
         void init_fast(const bit_vector* v=nullptr);
@@ -102,8 +107,14 @@ class select_support_mcl : public select_support
         select_support_mcl<t_b, t_pat_len>& operator=(const select_support_mcl& ss);
         select_support_mcl<t_b, t_pat_len>& operator=(select_support_mcl&&);
         void swap(select_support_mcl<t_b, t_pat_len>& ss);
+        size_type get_mini_or_long_bits()const;
 };
 
+template<uint8_t t_b, uint8_t t_pat_len>
+auto select_support_mcl<t_b,t_pat_len>::get_mini_or_long_bits()const -> size_type
+{
+    return mini_or_long_bits;
+}
 
 template<uint8_t t_b, uint8_t t_pat_len>
 select_support_mcl<t_b,t_pat_len>::select_support_mcl(const bit_vector* f_v):select_support(f_v)
@@ -112,6 +123,9 @@ select_support_mcl<t_b,t_pat_len>::select_support_mcl(const bit_vector* f_v):sel
         init_slow(vv);
     else
         init_fast(vv);
+    util::bit_compress(m_superblock);
+    //if(m_longsuperblock != nullptr) util::bit_compress(*m_longsuperblock);
+    //if(m_miniblock != nullptr ) util::bit_compress(*m_miniblock);
     return;
 }
 
@@ -168,6 +182,7 @@ void select_support_mcl<t_b,t_pat_len>::swap(select_support_mcl& ss)
     std::swap(m_longsuperblock, ss.m_longsuperblock);
     std::swap(m_miniblock, ss.m_miniblock);
     std::swap(m_arg_cnt, ss.m_arg_cnt);
+    std::swap(mini_or_long_bits, ss.mini_or_long_bits);
 }
 
 template<uint8_t t_b, uint8_t t_pat_len>
@@ -183,7 +198,8 @@ void select_support_mcl<t_b,t_pat_len>::copy(const select_support_mcl<t_b, t_pat
     delete [] m_longsuperblock;
     m_longsuperblock = nullptr;
     if (ss.m_longsuperblock!=nullptr) {
-        m_longsuperblock = new int_vector<0>[sb]; //copy longsuperblocks
+        //m_longsuperblock = new int_vector<0>[sb]; //copy longsuperblocks
+        m_longsuperblock = new int_vector<>[sb]; //copy longsuperblocks
         for (size_type i=0; i<sb; ++i) {
             m_longsuperblock[i] = ss.m_longsuperblock[i];
         }
@@ -191,7 +207,8 @@ void select_support_mcl<t_b,t_pat_len>::copy(const select_support_mcl<t_b, t_pat
     delete [] m_miniblock;
     m_miniblock = nullptr;
     if (ss.m_miniblock!=nullptr) {
-        m_miniblock = new int_vector<0>[sb]; // copy miniblocks
+        //m_miniblock = new int_vector<0>[sb]; // copy miniblocks
+        m_miniblock = new int_vector<>[sb]; // copy miniblocks
         for (size_type i=0; i<sb; ++i) {
             m_miniblock[i] = ss.m_miniblock[i];
         }
@@ -222,10 +239,11 @@ void select_support_mcl<t_b,t_pat_len>::init_slow(const bit_vector* v)
 
     size_type sb = (m_arg_cnt+SUPER_BLOCK_SIZE-1)/SUPER_BLOCK_SIZE; // number of superblocks
     delete [] m_miniblock;
-    m_miniblock = new int_vector<0>[sb];
+    //m_miniblock = new int_vector<0>[sb];
+    m_miniblock = new int_vector<>[sb];
 
-    m_superblock = int_vector<0>(sb, 0, m_logn);
-
+    //m_superblock = int_vector<0>(sb, 0, m_logn);
+    m_superblock = int_vector<>(sb, 0, m_logn);
 
     size_type arg_position[SUPER_BLOCK_SIZE], arg_cnt=0;
     size_type sb_cnt=0;
@@ -240,12 +258,16 @@ void select_support_mcl<t_b,t_pat_len>::init_slow(const bit_vector* v)
 
                 size_type pos_diff = arg_position[(arg_cnt-1)%SUPER_BLOCK_SIZE]-arg_position[0];
                 if (pos_diff > m_logn4) { // longblock
-                    if (m_longsuperblock == nullptr) m_longsuperblock = new int_vector<0>[sb]; // create longsuperblock
-                    m_longsuperblock[sb_cnt] = int_vector<0>(SUPER_BLOCK_SIZE, 0, bits::hi(arg_position[(arg_cnt-1)%SUPER_BLOCK_SIZE]) + 1);
-
+                    if (m_longsuperblock == nullptr)m_longsuperblock = new int_vector<>[sb]; //m_longsuperblock = new int_vector<0>[sb]; // create longsuperblock
+                    //m_longsuperblock[sb_cnt] = int_vector<0>(SUPER_BLOCK_SIZE, 0, bits::hi(arg_position[(arg_cnt-1)%SUPER_BLOCK_SIZE]) + 1);
+                    m_longsuperblock[sb_cnt] = int_vector<>(SUPER_BLOCK_SIZE, 0, bits::hi(arg_position[(arg_cnt-1)%SUPER_BLOCK_SIZE]) + 1);
+                    mini_or_long_bits += SUPER_BLOCK_SIZE * (bits::hi(arg_position[(arg_cnt-1)%SUPER_BLOCK_SIZE]) + 1);
                     for (size_type j=0; j <= (arg_cnt-1)%SUPER_BLOCK_SIZE ; ++j) m_longsuperblock[sb_cnt][j] = arg_position[j]; // copy argument positions to longsuperblock
+                    util::bit_compress(m_longsuperblock[sb_cnt]);
                 } else { // short block
-                    m_miniblock[sb_cnt] = int_vector<0>(64, 0, bits::hi(pos_diff)+1);
+                    //m_miniblock[sb_cnt] = int_vector<0>(64, 0, bits::hi(pos_diff)+1);
+                    m_miniblock[sb_cnt] = int_vector<>(64, 0, bits::hi(pos_diff)+1);
+                    mini_or_long_bits += 64 * (bits::hi(pos_diff) + 1);
                     for (size_type j=0; j <= (arg_cnt-1)%SUPER_BLOCK_SIZE; j+=64) {
                         m_miniblock[sb_cnt][j/64] = arg_position[j]-arg_position[0];
                     }
@@ -275,10 +297,13 @@ void select_support_mcl<t_b,t_pat_len>::init_fast(const bit_vector* v)
 //    size_type sb = (m_arg_cnt+63+SUPER_BLOCK_SIZE-1)/SUPER_BLOCK_SIZE; // number of superblocks, add 63 as the last block could contain 63 uninitialized bits
     size_type sb = (m_arg_cnt+SUPER_BLOCK_SIZE-1)/SUPER_BLOCK_SIZE; // number of superblocks
     delete [] m_miniblock;
-    m_miniblock = new int_vector<0>[sb];
+    //m_miniblock = new int_vector<0>[sb];
+    m_miniblock = new int_vector<>[sb];
 
-    m_superblock = int_vector<0>(sb, 0, m_logn);// TODO: hier koennte man logn noch optimieren...s
+    //m_superblock = int_vector<0>(sb, 0, m_logn);// TODO: hier koennte man logn noch optimieren...s
+    m_superblock = int_vector<>(sb, 0, m_logn);// TODO: hier koennte man logn noch optimieren...s
 
+    //std::cout << sb << " " << m_logn << " CONSTRUCT\n";
     bit_vector::size_type arg_position[SUPER_BLOCK_SIZE];
     const uint64_t* data = v->data();
     uint64_t carry_new=0;
@@ -301,9 +326,11 @@ void select_support_mcl<t_b,t_pat_len>::init_fast(const bit_vector* v)
                     }
                 size_type pos_diff = pos_of_last_arg_in_the_block - arg_position[0];
                 if (pos_diff > m_logn4) { // long block
-                    if (m_longsuperblock == nullptr) m_longsuperblock = new int_vector<0>[sb+1]; // create longsuperblock
+                    if (m_longsuperblock == nullptr) m_longsuperblock = new int_vector<>[sb+1]; //m_longsuperblock = new int_vector<0>[sb+1]; // create longsuperblock
                     // GEANDERT am 2010-07-17 +1 nach pos_of_last_arg..
-                    m_longsuperblock[sb_cnt] = int_vector<0>(SUPER_BLOCK_SIZE, 0, bits::hi(pos_of_last_arg_in_the_block) + 1);
+                    //m_longsuperblock[sb_cnt] = int_vector<0>(SUPER_BLOCK_SIZE, 0, bits::hi(pos_of_last_arg_in_the_block) + 1);
+                    m_longsuperblock[sb_cnt] = int_vector<>(SUPER_BLOCK_SIZE, 0, bits::hi(pos_of_last_arg_in_the_block) + 1);
+                    mini_or_long_bits += SUPER_BLOCK_SIZE * (bits::hi(pos_of_last_arg_in_the_block) + 1);
                     for (size_type j=arg_position[0], k=0; k < SUPER_BLOCK_SIZE and j <= pos_of_last_arg_in_the_block; ++j)
                         if (select_support_trait<t_b, t_pat_len>::found_arg(j, *v)) {
                             if (k>=SUPER_BLOCK_SIZE) {
@@ -317,8 +344,11 @@ void select_support_mcl<t_b,t_pat_len>::init_fast(const bit_vector* v)
                             }
                             m_longsuperblock[sb_cnt][k++] = j;
                         }
+                    util::bit_compress(m_longsuperblock[sb_cnt]);
                 } else {
-                    m_miniblock[sb_cnt] = int_vector<0>(64, 0, bits::hi(pos_diff)+1);
+                    //m_miniblock[sb_cnt] = int_vector<0>(64, 0, bits::hi(pos_diff)+1);
+                    m_miniblock[sb_cnt] = int_vector<>(64, 0, bits::hi(pos_diff)+1);
+                    mini_or_long_bits += 64 * (bits::hi(pos_diff) + 1);
                     for (size_type j=0; j < SUPER_BLOCK_SIZE; j+=64) {
                         m_miniblock[sb_cnt][j/64] = arg_position[j]-arg_position[0];
                     }
@@ -331,13 +361,16 @@ void select_support_mcl<t_b,t_pat_len>::init_fast(const bit_vector* v)
     }
     // handle last block: append long superblock
     if (last_k64 > 1) {
-        if (m_longsuperblock == nullptr) m_longsuperblock = new int_vector<0>[sb+1]; // create longsuperblock
-        m_longsuperblock[sb_cnt] = int_vector<0>(SUPER_BLOCK_SIZE, 0, bits::hi(v->size()-1) + 1);
+        if (m_longsuperblock == nullptr) m_longsuperblock = new int_vector<>[sb+1];//m_longsuperblock = new int_vector<0>[sb+1]; // create longsuperblock
+        //m_longsuperblock[sb_cnt] = int_vector<0>(SUPER_BLOCK_SIZE, 0, bits::hi(v->size()-1) + 1);
+        m_longsuperblock[sb_cnt] = int_vector<>(SUPER_BLOCK_SIZE, 0, bits::hi(v->size()-1) + 1);
+        mini_or_long_bits += SUPER_BLOCK_SIZE * (bits::hi(v->size()-1) + 1);
         for (size_type i=arg_position[0],k=0; i < v->size(); ++i) {
             if (select_support_trait<t_b, t_pat_len>::found_arg(i, *v)) {
                 m_longsuperblock[sb_cnt][k++] = i;
             }
         }
+        util::bit_compress(m_longsuperblock[sb_cnt]);
         ++sb_cnt;
     }
 }
@@ -429,11 +462,13 @@ auto select_support_mcl<t_b,t_pat_len>::serialize(std::ostream& out, structure_t
     // write the number of 1-bits in the supported bit_vector
     out.write((char*) &m_arg_cnt, sizeof(size_type)/sizeof(char));
     written_bytes = sizeof(size_type)/sizeof(char);
+    //std::cout << "BYTES OF SIZE_TYPE: " << sizeof(size_type)/sizeof(char) << "\n";
     // number of superblocks in the data structure
     size_type sb = (m_arg_cnt+4095)>>12;
 
     if (m_arg_cnt) { // if there exists 1-bits to be supported
         written_bytes += m_superblock.serialize(out, child, "superblock"); // serialize superblocks
+        //std::cout << "M_SUPERBLOCK: " << m_superblock.serialize(out, child, "superblock") * 8 << "\n";
         bit_vector mini_or_long;// Helper vector: mini or long block?
         if (m_longsuperblock!=nullptr) {
             mini_or_long.resize(sb); // resize indicator bit_vector to the number of superblocks
@@ -441,13 +476,16 @@ auto select_support_mcl<t_b,t_pat_len>::serialize(std::ostream& out, structure_t
                 mini_or_long[i] = !m_miniblock[i].empty();
         }
         written_bytes += mini_or_long.serialize(out, child, "mini_or_long");
+        //std::cout << "MINI_OR_LONG: " << mini_or_long.serialize(out, child, "mini_or_long") << "\n";
         size_type written_bytes_long = 0;
         size_type written_bytes_mini = 0;
         for (size_type i=0; i < sb; ++i)
             if (!mini_or_long.empty() and !mini_or_long[i]) {
                 written_bytes_long += m_longsuperblock[i].serialize(out);
+                //std::cout << "M_LONGSUPERBLOCK: " << m_longsuperblock[i].serialize(out) << "\n";
             } else {
                 written_bytes_mini += m_miniblock[i].serialize(out);
+                //std::cout << "M_MINIBLOCK: " << m_miniblock[i].serialize(out) << "\n";
             }
         written_bytes += written_bytes_long;
         written_bytes += written_bytes_mini;
@@ -479,9 +517,11 @@ void select_support_mcl<t_b,t_pat_len>::load(std::istream& in, const bit_vector*
 
         bit_vector mini_or_long;// Helper vector: mini or long block?
         mini_or_long.load(in); // Load the helper vector
-        m_miniblock = new int_vector<0>[sb]; // Create miniblock int_vector<0>
+        //m_miniblock = new int_vector<0>[sb]; // Create miniblock int_vector<0>
+        m_miniblock = new int_vector<>[sb]; // Create miniblock int_vector<0>
         if (!mini_or_long.empty())
-            m_longsuperblock = new int_vector<0>[sb]; // Create longsuperblock int_vector<0>
+            //m_longsuperblock = new int_vector<0>[sb]; // Create longsuperblock int_vector<0>
+            m_longsuperblock = new int_vector<>[sb]; // Create longsuperblock int_vector<0>
 
         for (size_type i=0; i < sb; ++i)
             if (!mini_or_long.empty() and not mini_or_long[i]) {

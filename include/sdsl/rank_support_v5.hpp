@@ -60,23 +60,30 @@ class rank_support_v5 : public rank_support
         enum { bit_pat_len = t_pat_len };
     private:
 //      basic block for interleaved storage of superblockrank and blockrank
-        int_vector<64> m_basic_block;
+        //int_vector<64> m_basic_block;
+        int_vector<> m_basic_block;
+        int_vector<64> new_int_vector;
     public:
         explicit rank_support_v5(const bit_vector* v = nullptr) {
             set_vector(v);
             if (v == nullptr) {
                 return;
             } else if (v->empty()) {
-                m_basic_block = int_vector<64>(2,0);
+                //m_basic_block = int_vector<64>(2,0);
+                m_basic_block = int_vector<>(2,0);
                 return;
             }
-            size_type basic_block_size = ((v->capacity() >> 11)+1)<<1;
+            //size_type basic_block_size = ((v->capacity() >> 11)+1)<<1;
+            size_type basic_block_size = ((v->capacity() >> 11)+1);
             m_basic_block.resize(basic_block_size);   // resize structure for basic_blocks
+            new_int_vector.resize(basic_block_size);
             if (m_basic_block.empty())
                 return;
             const uint64_t* data = m_v->data();
             size_type i, j=0;
             m_basic_block[0] = m_basic_block[1] = 0;
+            m_basic_block[0] = 0;
+            new_int_vector[0] = 0;
 
             uint64_t carry = trait_type::init_carry();
             uint64_t sum   = trait_type::args_in_the_word(*data, carry);
@@ -84,9 +91,10 @@ class rank_support_v5 : public rank_support
             uint64_t cnt_words=1;
             for (i = 1; i < (m_v->capacity()>>6) ; ++i, ++cnt_words) {
                 if (cnt_words == 32) {
-                    j += 2;
-                    m_basic_block[j-1] = second_level_cnt;
-                    m_basic_block[j]     = m_basic_block[j-2] + sum;
+                    j += 1;
+                    //m_basic_block[j-1] = second_level_cnt;
+                    new_int_vector[j] = second_level_cnt;
+                    m_basic_block[j] = m_basic_block[j-1] + sum;
                     second_level_cnt = sum = cnt_words = 0;
                 } else if ((cnt_words%6)==0) {
                     // pack the prefix sum for each 6x64bit block into the second_level_cnt
@@ -99,13 +107,18 @@ class rank_support_v5 : public rank_support
                 second_level_cnt |= sum<<(60-12*(cnt_words/6));
             }
             if (cnt_words == 32) {
-                j += 2;
-                m_basic_block[j-1] = second_level_cnt;
-                m_basic_block[j]   = m_basic_block[j-2] + sum;
-                m_basic_block[j+1] = 0;
+                j += 1;
+                //m_basic_block[j-1] = second_level_cnt;
+                new_int_vector[j] = second_level_cnt;
+                m_basic_block[j]   = m_basic_block[j-1] + sum;
+                //m_basic_block[j+1] = 0;
+                new_int_vector[j+1] = 0;
             } else {
-                m_basic_block[j+1] = second_level_cnt;
+                //m_basic_block[j+1] = second_level_cnt;
+                new_int_vector[j+1] = second_level_cnt;
+
             }
+            util::bit_compress(m_basic_block);
         }
 
         rank_support_v5(const rank_support_v5&) = default;
@@ -116,11 +129,17 @@ class rank_support_v5 : public rank_support
         size_type rank(size_type idx) const {
             assert(m_v != nullptr);
             assert(idx <= m_v->size());
-            const uint64_t* p = m_basic_block.data()
-                                + ((idx>>10)&0xFFFFFFFFFFFFFFFEULL);// (idx/2048)*2
+            /*const uint64_t* p = m_basic_block.data()
+                                + ((idx>>10)&0xFFFFFFFFFFFFFFFEULL);*/// (idx/2048)*2
 //                     ( prefix sum of the 6x64bit blocks | (idx%2048)/(64*6) )
+            /*
             size_type result = *p
                                + ((*(p+1)>>(60-12*((idx&0x7FF)/(64*6))))&0x7FFULL)
+                               + trait_type::word_rank(m_v->data(), idx);
+            */
+            //size_type result = m_basic_block[(idx>>10)&0xFFFFFFFFFFFFFFFEULL] + ((m_basic_block[((idx>>10)&0xFFFFFFFFFFFFFFFEULL)+1]>>(60-12*((idx&0x7FF)/(64*6))))&0x7FFULL)
+                               //+ trait_type::word_rank(m_v->data(), idx);
+            size_type result = m_basic_block[(idx>>11)] + ((new_int_vector[((idx>>11))+1]>>(60-12*((idx&0x7FF)/(64*6))))&0x7FFULL)
                                + trait_type::word_rank(m_v->data(), idx);
             idx -= (idx&0x3F);
             uint8_t to_do = ((idx>>6)&0x1FULL)%6;
@@ -144,6 +163,7 @@ class rank_support_v5 : public rank_support
             size_type written_bytes = 0;
             structure_tree_node* child = structure_tree::add_child(v, name, util::class_name(*this));
             written_bytes += m_basic_block.serialize(out, child, "cumulative_counts");
+            written_bytes += new_int_vector.serialize(out, child, "cumulative_counts");
             structure_tree::add_size(child, written_bytes);
             return written_bytes;
         }
@@ -152,6 +172,7 @@ class rank_support_v5 : public rank_support
             set_vector(v);
             assert(m_v != nullptr); // supported bit vector should be known
             m_basic_block.load(in);
+            new_int_vector.load(in);
         }
 
         void set_vector(const bit_vector* v=nullptr) {
@@ -161,6 +182,7 @@ class rank_support_v5 : public rank_support
         void swap(rank_support_v5& rs) {
             if (this != &rs) { // if rs and _this_ are not the same object
                 m_basic_block.swap(rs.m_basic_block);
+                new_int_vector.swap(rs.new_int_vector);
             }
         }
 };
